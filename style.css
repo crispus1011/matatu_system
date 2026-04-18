@@ -1,0 +1,51 @@
+<?php
+/**
+ * EC Matatu — Trip Search API
+ * GET /api/search.php?q=githurai&type=trips|routes
+ */
+require_once '../includes/auth.php';
+header('Content-Type: application/json');
+
+if (!isLoggedIn()) {
+    echo json_encode(['success' => false, 'message' => 'Unauthorised.']);
+    exit();
+}
+
+$q    = '%' . $conn->real_escape_string(sanitize($_GET['q'] ?? '')) . '%';
+$type = sanitize($_GET['type'] ?? 'trips');
+
+if ($type === 'routes') {
+    $results = $conn->query("
+        SELECT id, route_name, origin, destination, fare
+        FROM routes
+        WHERE status='active' AND (route_name LIKE '$q' OR origin LIKE '$q' OR destination LIKE '$q')
+        LIMIT 8
+    ");
+    $data = [];
+    while ($r = $results->fetch_assoc()) $data[] = $r;
+    echo json_encode(['success' => true, 'results' => $data]);
+    exit();
+}
+
+// Default: search upcoming trips
+$results = $conn->query("
+    SELECT t.id, t.departure_time, t.available_seats, t.total_seats,
+           r.route_name, r.origin, r.destination, r.fare,
+           v.registration_no, u.full_name as driver_name
+    FROM trips t
+    JOIN routes r ON t.route_id=r.id
+    JOIN vehicles v ON t.vehicle_id=v.id
+    JOIN users u ON t.driver_id=u.id
+    WHERE t.status='scheduled'
+      AND t.departure_time > NOW()
+      AND t.available_seats > 0
+      AND (r.origin LIKE '$q' OR r.destination LIKE '$q' OR r.route_name LIKE '$q')
+    ORDER BY t.departure_time ASC
+    LIMIT 10
+");
+$data = [];
+while ($r = $results->fetch_assoc()) {
+    $r['departure_formatted'] = date('D d M Y, H:i', strtotime($r['departure_time']));
+    $data[] = $r;
+}
+echo json_encode(['success' => true, 'results' => $data]);
